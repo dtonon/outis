@@ -22,10 +22,10 @@ expose you.
 ```
 go build -o outis cmd/outis/main.go
 ./outis init                  # domain, mail host, SMTP; password goes to the OS keychain
-./outis bounce message.eml    # preview, then confirm
-./outis bounce -c             # read the email from the clipboard
-./outis bounce -n message.eml # dry run, print only
-./outis bounce -y -r me@example.com message.eml
+./outis message.eml    # preview, then confirm
+./outis -c             # read the email from the clipboard
+./outis -n message.eml # dry run, print only
+./outis -y -r me@example.com message.eml
 ```
 
 Config lives in `os.UserConfigDir()/outis/config.toml`

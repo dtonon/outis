@@ -21,11 +21,11 @@ import (
 )
 
 const usage = `Usage:
-  outis init                    interactive configuration
-  outis bounce [flags] [file]   build a bounce for an email (file, stdin or clipboard)
-  outis config                  print the config file path
+  outis [flags] [file]   build a bounce for an email (file, stdin or clipboard)
+  outis init             interactive configuration
+  outis config           print the config file path
 
-Flags for bounce:
+Flags:
   -c, --clipboard      read the email from the clipboard
   -r, --recipient      address to report as unknown (default: first at your domain)
   -n, --dry-run        print the bounce, do not send
@@ -34,25 +34,20 @@ Flags for bounce:
 `
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
-	}
 	var err error
-	switch os.Args[1] {
+	switch first(os.Args[1:]) {
 	case "init":
 		err = runInit()
-	case "bounce":
-		err = runBounce(os.Args[2:])
 	case "config":
 		var p string
 		p, err = config.Path()
 		fmt.Println(p)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
+	case "bounce":
+		err = runBounce(os.Args[2:])
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", os.Args[1], usage)
-		os.Exit(2)
+		err = runBounce(os.Args[1:])
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -226,6 +221,13 @@ func confirm() bool {
 	s, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	s = strings.ToLower(strings.TrimSpace(s))
 	return s == "y" || s == "yes"
+}
+
+func first(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	return args[0]
 }
 
 func firstNonEmpty(a, b string) string {
