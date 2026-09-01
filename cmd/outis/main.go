@@ -46,7 +46,7 @@ func main() {
 		var p string
 		p, err = config.Path()
 		fmt.Println(p)
-	case "-h", "--help", "help":
+	case "", "-h", "--help", "help":
 		fmt.Print(usage)
 	case "bounce":
 		err = runBounce(os.Args[2:])
