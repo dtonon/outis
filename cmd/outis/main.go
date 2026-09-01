@@ -22,10 +22,12 @@ import (
 
 const usage = `Usage:
   outis [flags] [file]   build a bounce for an email (file, stdin or clipboard)
-  outis init             interactive configuration
+  outis init [domain]    add or update an account interactively
+  outis accounts         list configured accounts
   outis config           print the config file path
 
 Flags:
+  -a, --account DOMAIN report as the account for DOMAIN instead of matching recipients
   -c, --clipboard      read the email from the clipboard
   -r, --recipient      address to report as unknown (default: first at your domain)
   -n, --dry-run        print the bounce, do not send
@@ -37,7 +39,9 @@ func main() {
 	var err error
 	switch first(os.Args[1:]) {
 	case "init":
-		err = runInit()
+		err = runInit(first(os.Args[2:]))
+	case "accounts":
+		err = runAccounts()
 	case "config":
 		var p string
 		p, err = config.Path()
@@ -55,10 +59,10 @@ func main() {
 	}
 }
 
-func runInit() error {
-	cur, _ := config.Load()
-	if cur == nil {
-		cur = &config.Config{SMTP: config.SMTP{Port: 587}}
+func runInit(domain string) error {
+	cfg, _ := config.Load()
+	if cfg == nil {
+		cfg = &config.Config{}
 	}
 	in := bufio.NewReader(os.Stdin)
 	ask := func(label, def string) string {
@@ -74,16 +78,21 @@ func runInit() error {
 		return def
 	}
 
-	c := *cur
-	c.Domain = ask("Your email domain (e.g. example.com)", c.Domain)
-	c.MTAHost = ask("Mail server hostname shown in the bounce", firstNonEmpty(c.MTAHost, "mail."+c.Domain))
-	c.SMTP.Host = ask("SMTP host", c.SMTP.Host)
-	port, err := strconv.Atoi(ask("SMTP port", strconv.Itoa(c.SMTP.Port)))
+	if domain == "" {
+		domain = ask("Email domain (e.g. example.com)", "")
+	}
+	a := config.Account{Domain: domain, SMTP: config.SMTP{Port: 587}}
+	if cur := cfg.Find(domain); cur != nil {
+		a = *cur
+	}
+	a.MTAHost = ask("Mail server hostname shown in the bounce", firstNonEmpty(a.MTAHost, "mail."+domain))
+	a.SMTP.Host = ask("SMTP host", a.SMTP.Host)
+	port, err := strconv.Atoi(ask("SMTP port", strconv.Itoa(a.SMTP.Port)))
 	if err != nil {
 		return fmt.Errorf("invalid port: %w", err)
 	}
-	c.SMTP.Port = port
-	c.SMTP.Username = ask("SMTP username", c.SMTP.Username)
+	a.SMTP.Port = port
+	a.SMTP.Username = ask("SMTP username", a.SMTP.Username)
 
 	fmt.Print("SMTP password (stored in the OS keychain, empty to keep current): ")
 	pw, err := term.ReadPassword(int(syscall.Stdin))
@@ -91,17 +100,18 @@ func runInit() error {
 	if err != nil {
 		return err
 	}
-	if err := c.Validate(); err != nil {
+	if err := a.Validate(); err != nil {
 		return err
 	}
 	if len(pw) > 0 {
-		if err := secret.Set(c.SMTP.Username, string(pw)); err != nil {
+		if err := secret.Set(a.SMTP.Username, string(pw)); err != nil {
 			return fmt.Errorf("keychain: %w", err)
 		}
-	} else if _, err := secret.Get(c.SMTP.Username); err != nil {
-		return fmt.Errorf("no password stored for %s", c.SMTP.Username)
+	} else if _, err := secret.Get(a.SMTP.Username); err != nil {
+		return fmt.Errorf("no password stored for %s", a.SMTP.Username)
 	}
-	if err := c.Save(); err != nil {
+	cfg.Upsert(a)
+	if err := cfg.Save(); err != nil {
 		return err
 	}
 	p, _ := config.Path()
@@ -109,13 +119,26 @@ func runInit() error {
 	return nil
 }
 
+func runAccounts() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	for _, a := range cfg.Accounts {
+		fmt.Printf("%-24s %s via %s:%d as %s\n", a.Domain, a.MTAHost, a.SMTP.Host, a.SMTP.Port, a.SMTP.Username)
+	}
+	return nil
+}
+
 func runBounce(args []string) error {
 	fs := flag.NewFlagSet("bounce", flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	var (
-		fromClip, dryRun, yes bool
-		recipient, out        string
+		fromClip, dryRun, yes   bool
+		recipient, out, account string
 	)
+	fs.StringVar(&account, "a", "", "")
+	fs.StringVar(&account, "account", "", "")
 	fs.BoolVar(&fromClip, "c", false, "")
 	fs.BoolVar(&fromClip, "clipboard", false, "")
 	fs.BoolVar(&dryRun, "n", false, "")
@@ -143,9 +166,17 @@ func runBounce(args []string) error {
 	if err != nil {
 		return err
 	}
+	var acc *config.Account
+	if account != "" {
+		if acc = cfg.Find(account); acc == nil {
+			return fmt.Errorf("no account for %s, configured: %s", account, strings.Join(cfg.Domains(), ", "))
+		}
+	} else if acc, err = cfg.Match(orig.Recipients); err != nil {
+		return err
+	}
 	res, err := bounce.Build(orig, bounce.Options{
-		Domain:    cfg.Domain,
-		MTAHost:   cfg.MTAHost,
+		Domain:    acc.Domain,
+		MTAHost:   acc.MTAHost,
 		Recipient: recipient,
 	})
 	if err != nil {
@@ -170,18 +201,18 @@ func runBounce(args []string) error {
 		return fmt.Errorf("aborted")
 	}
 
-	pw, err := secret.Get(cfg.SMTP.Username)
+	pw, err := secret.Get(acc.SMTP.Username)
 	if err != nil {
-		return fmt.Errorf("keychain: %w (run `outis init`)", err)
+		return fmt.Errorf("keychain: %w (run `outis init %s`)", err, acc.Domain)
 	}
-	envelopes := []string{"", res.From, cfg.SMTP.Username}
-	if cfg.EnvelopeFrom != "" {
-		envelopes = []string{cfg.EnvelopeFrom}
+	envelopes := []string{"", res.From, acc.SMTP.Username}
+	if acc.EnvelopeFrom != "" {
+		envelopes = []string{acc.EnvelopeFrom}
 	}
 	env, err := sender.Send(sender.Account{
-		Host:     cfg.SMTP.Host,
-		Port:     cfg.SMTP.Port,
-		Username: cfg.SMTP.Username,
+		Host:     acc.SMTP.Host,
+		Port:     acc.SMTP.Port,
+		Username: acc.SMTP.Username,
 		Password: pw,
 	}, envelopes, res.To, res.Message)
 	if err != nil {
