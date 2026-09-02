@@ -19,6 +19,7 @@ type Original struct {
 	Raw        []byte
 	Header     mail.Header
 	ReturnPath string
+	From       string
 	MessageID  string
 	Recipients []string
 }
@@ -31,15 +32,19 @@ type Options struct {
 	MTAHost string
 	// Recipient overrides the automatically picked failed address.
 	Recipient string
-	Now       time.Time
+	// SendTo overrides the Return-Path as destination of the bounce.
+	SendTo string
+	Now    time.Time
 }
 
 // Result is a rendered bounce ready to be sent.
 type Result struct {
-	From      string
-	To        string
-	Recipient string
-	Message   []byte
+	From string
+	To   string
+	// Redirected is true when To is not the original Return-Path.
+	Redirected bool
+	Recipient  string
+	Message    []byte
 }
 
 // Parse reads a raw RFC 5322 message and extracts what the DSN needs.
@@ -65,6 +70,7 @@ func Parse(r io.Reader) (*Original, error) {
 	if o.ReturnPath == "" {
 		return nil, errors.New("no Return-Path, Sender or From header found")
 	}
+	o.From = firstAddress(msg.Header.Get("From"))
 	o.MessageID = strings.TrimSpace(msg.Header.Get("Message-ID"))
 
 	for _, h := range []string{"Delivered-To", "X-Original-To", "To", "Cc"} {
@@ -115,6 +121,10 @@ func Build(o *Original, opt Options) (*Result, error) {
 	qid := queueID()
 	date := now.Format("Mon, 2 Jan 2006 15:04:05 -0700 (MST)")
 	from := "MAILER-DAEMON@" + opt.Domain
+	to := o.ReturnPath
+	if opt.SendTo != "" {
+		to = opt.SendTo
+	}
 	boundary := fmt.Sprintf("%s.%d/%s", qid, now.Unix(), opt.MTAHost)
 	diag := fmt.Sprintf("unknown user: \"%s\"", local)
 
@@ -126,7 +136,7 @@ func Build(o *Original, opt Options) (*Result, error) {
 	w("Date: %s", date)
 	w("From: %s (Mail Delivery System)", from)
 	w("Subject: Undelivered Mail Returned to Sender")
-	w("To: %s", o.ReturnPath)
+	w("To: %s", to)
 	w("Auto-Submitted: auto-replied")
 	w("MIME-Version: 1.0")
 	w("Content-Type: multipart/report; report-type=delivery-status;")
@@ -188,10 +198,11 @@ func Build(o *Original, opt Options) (*Result, error) {
 	w("--%s--", boundary)
 
 	return &Result{
-		From:      from,
-		To:        o.ReturnPath,
-		Recipient: rcpt,
-		Message:   []byte(b.String()),
+		From:       from,
+		To:         to,
+		Redirected: to != o.ReturnPath,
+		Recipient:  rcpt,
+		Message:    []byte(b.String()),
 	}, nil
 }
 

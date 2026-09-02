@@ -59,6 +59,26 @@ func TestBuild(t *testing.T) {
 	}
 }
 
+func TestSendTo(t *testing.T) {
+	o, _ := Parse(strings.NewReader(sample))
+	if o.From != "news@example.org" {
+		t.Fatalf("from: %q", o.From)
+	}
+	res, err := Build(o, Options{Domain: "example.com", MTAHost: "mail.example.com", SendTo: o.From})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.To != "news@example.org" || !res.Redirected {
+		t.Fatalf("to: %q redirected: %v", res.To, res.Redirected)
+	}
+	if !strings.Contains(string(res.Message), "To: news@example.org\r\n") {
+		t.Error("To header not redirected")
+	}
+	if !strings.Contains(string(res.Message), "X-Postfix-Sender: rfc822; bounce+123@lists.example.org") {
+		t.Error("X-Postfix-Sender should keep the envelope sender")
+	}
+}
+
 func TestNoRecipientAtDomain(t *testing.T) {
 	o, _ := Parse(strings.NewReader(sample))
 	_, err := Build(o, Options{Domain: "nope.com", MTAHost: "mail.nope.com"})

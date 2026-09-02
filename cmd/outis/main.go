@@ -213,14 +213,18 @@ func runBounce(args []string) error {
 	pending := 0
 	for _, j := range jobs {
 		if j.err != nil {
-			fmt.Fprintf(os.Stderr, "%-24s skipped: %v\n", j.name, j.err)
+			fmt.Fprintf(os.Stderr, "%s\n-> skipped: %v\n\n", j.name, j.err)
 			continue
 		}
 		pending++
+		note := ""
+		if j.res.Redirected {
+			note = " (From header, Return-Path is in reply_to_from_domains)"
+		}
 		if batch {
-			fmt.Fprintf(os.Stderr, "%-24s %-28s -> %-28s %s\n", j.name, j.res.Recipient, j.res.To, j.acc.Domain)
+			fmt.Fprintf(os.Stderr, "%s %s\n-> %s %s%s\n\n", j.name, j.res.Recipient, j.res.To, j.acc.Domain, note)
 		} else {
-			fmt.Fprintf(os.Stderr, "Bounce %s as unknown, sending to %s\n", j.res.Recipient, j.res.To)
+			fmt.Fprintf(os.Stderr, "Bounce %s as unknown, sending to %s%s\n", j.res.Recipient, j.res.To, note)
 		}
 	}
 	if pending == 0 {
@@ -272,11 +276,15 @@ func prepare(cfg *config.Config, forced *config.Account, name, recipient string)
 			return nil, nil, err
 		}
 	}
-	res, err := bounce.Build(orig, bounce.Options{
+	opt := bounce.Options{
 		Domain:    acc.Domain,
 		MTAHost:   acc.MTAHost,
 		Recipient: recipient,
-	})
+	}
+	if cfg.ReplyToFrom(orig.ReturnPath) && orig.From != "" {
+		opt.SendTo = orig.From
+	}
+	res, err := bounce.Build(orig, opt)
 	if err != nil {
 		return nil, nil, err
 	}

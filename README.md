@@ -66,6 +66,18 @@ port = 465
 username = "mailer-daemon@other.org"
 ```
 
+## Providers with shared suppression lists
+
+Some providers, notably Amazon SES, keep a suppression list shared across all
+their customers: one hard bounce makes every SES sender unable to reach your
+address for a while. For Return-Path domains listed in `reply_to_from_domains`
+the bounce is sent to the From header address instead. The default is
+`["amazonses.com"]` and subdomains match. Set it to `[]` to disable.
+
+```toml
+reply_to_from_domains = ["amazonses.com"]
+```
+
 `envelope_from` on an account forces the SMTP envelope sender instead of
 trying the null sender, `MAILER-DAEMON@domain` and the username in turn.
 

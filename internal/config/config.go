@@ -29,13 +29,20 @@ type Account struct {
 }
 
 type Config struct {
-	Accounts []Account `toml:"accounts"`
+	// ReplyToFromDomains lists Return-Path domains whose bounces are sent to
+	// the From header instead, e.g. providers with a shared suppression list.
+	ReplyToFromDomains []string  `toml:"reply_to_from_domains"`
+	Accounts           []Account `toml:"accounts"`
 }
+
+// DefaultReplyToFromDomains is used when the config does not set the list.
+var DefaultReplyToFromDomains = []string{"amazonses.com"}
 
 // legacy is the single-account layout used before multi-account support.
 type legacy struct {
 	Account
-	Accounts []Account `toml:"accounts"`
+	ReplyToFromDomains []string  `toml:"reply_to_from_domains"`
+	Accounts           []Account `toml:"accounts"`
 }
 
 // Path returns the config file location, honoring OUTIS_CONFIG.
@@ -62,7 +69,10 @@ func Load() (*Config, error) {
 		}
 		return nil, err
 	}
-	c := &Config{Accounts: l.Accounts}
+	c := &Config{Accounts: l.Accounts, ReplyToFromDomains: l.ReplyToFromDomains}
+	if c.ReplyToFromDomains == nil {
+		c.ReplyToFromDomains = DefaultReplyToFromDomains
+	}
 	if l.Domain != "" {
 		c.Accounts = append([]Account{l.Account}, c.Accounts...)
 	}
@@ -97,6 +107,17 @@ func (c *Config) Match(recipients []string) (*Account, error) {
 		}
 		return nil, fmt.Errorf("recipients match several accounts (%s), use --account", strings.Join(ds, ", "))
 	}
+}
+
+// ReplyToFrom reports whether bounces for this Return-Path go to the From header.
+func (c *Config) ReplyToFrom(returnPath string) bool {
+	d := domainOf(returnPath)
+	for _, s := range c.ReplyToFromDomains {
+		if strings.EqualFold(d, s) || strings.HasSuffix(strings.ToLower(d), "."+strings.ToLower(s)) {
+			return true
+		}
+	}
+	return false
 }
 
 // Find returns the account for a domain, or nil.
@@ -145,6 +166,9 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) Save() error {
+	if c.ReplyToFromDomains == nil {
+		c.ReplyToFromDomains = DefaultReplyToFromDomains
+	}
 	p, err := Path()
 	if err != nil {
 		return err
