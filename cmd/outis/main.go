@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -21,7 +22,7 @@ import (
 )
 
 const usage = `Usage:
-  outis [flags] [file]   build a bounce for an email (file, stdin or clipboard)
+  outis [flags] [file|dir ...]   build bounces for emails (files, directories, stdin or clipboard)
   outis init [domain]    add or update an account interactively
   outis accounts         list configured accounts
   outis config           print the config file path
@@ -31,7 +32,7 @@ Flags:
   -c, --clipboard      read the email from the clipboard
   -r, --recipient      address to report as unknown (default: first at your domain)
   -n, --dry-run        print the bounce, do not send
-  -o, --out FILE       also write the bounce to FILE
+  -o, --out PATH       also write the bounce to PATH (a directory when processing several files)
   -y, --yes            send without confirmation
 `
 
@@ -130,6 +131,13 @@ func runAccounts() error {
 	return nil
 }
 
+type job struct {
+	name string
+	acc  *config.Account
+	res  *bounce.Result
+	err  error
+}
+
 func runBounce(args []string) error {
 	fs := flag.NewFlagSet("bounce", flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
@@ -157,22 +165,112 @@ func runBounce(args []string) error {
 	if err != nil {
 		return err
 	}
-
-	src, err := readSource(fromClip, fs.Arg(0))
-	if err != nil {
-		return err
-	}
-	orig, err := bounce.Parse(src)
-	if err != nil {
-		return err
-	}
-	var acc *config.Account
+	var forced *config.Account
 	if account != "" {
-		if acc = cfg.Find(account); acc == nil {
+		if forced = cfg.Find(account); forced == nil {
 			return fmt.Errorf("no account for %s, configured: %s", account, strings.Join(cfg.Domains(), ", "))
 		}
-	} else if acc, err = cfg.Match(orig.Recipients); err != nil {
+	}
+
+	inputs, err := collectInputs(fromClip, fs.Args())
+	if err != nil {
 		return err
+	}
+	batch := len(inputs) > 1
+
+	var jobs []job
+	for _, in := range inputs {
+		j := job{name: in}
+		j.acc, j.res, j.err = prepare(cfg, forced, in, recipient)
+		if j.err != nil && !batch {
+			return j.err
+		}
+		jobs = append(jobs, j)
+	}
+
+	if out != "" {
+		if err := writeOut(out, jobs, batch); err != nil {
+			return err
+		}
+	}
+
+	if dryRun || (!yes && !batch) {
+		for _, j := range jobs {
+			if j.err != nil {
+				continue
+			}
+			if batch {
+				fmt.Printf("==> %s\n", j.name)
+			}
+			os.Stdout.Write(j.res.Message)
+			fmt.Println()
+		}
+	}
+	if dryRun {
+		return failures(jobs)
+	}
+
+	pending := 0
+	for _, j := range jobs {
+		if j.err != nil {
+			fmt.Fprintf(os.Stderr, "%-24s skipped: %v\n", j.name, j.err)
+			continue
+		}
+		pending++
+		if batch {
+			fmt.Fprintf(os.Stderr, "%-24s %-28s -> %-28s %s\n", j.name, j.res.Recipient, j.res.To, j.acc.Domain)
+		} else {
+			fmt.Fprintf(os.Stderr, "Bounce %s as unknown, sending to %s\n", j.res.Recipient, j.res.To)
+		}
+	}
+	if pending == 0 {
+		return failures(jobs)
+	}
+	if !yes {
+		if batch {
+			fmt.Fprintf(os.Stderr, "Send %d bounces? [y/N] ", pending)
+		} else {
+			fmt.Fprint(os.Stderr, "Send? [y/N] ")
+		}
+		if !confirm() {
+			return fmt.Errorf("aborted")
+		}
+	}
+
+	for i := range jobs {
+		j := &jobs[i]
+		if j.err != nil {
+			continue
+		}
+		if j.err = send(j.acc, j.res); j.err != nil {
+			fmt.Fprintf(os.Stderr, "%-24s failed: %v\n", j.name, j.err)
+			continue
+		}
+		if batch {
+			fmt.Fprintf(os.Stderr, "%-24s sent\n", j.name)
+		} else {
+			fmt.Fprintln(os.Stderr, "Sent")
+		}
+	}
+	return failures(jobs)
+}
+
+// prepare parses one input and builds its bounce with the matching account.
+func prepare(cfg *config.Config, forced *config.Account, name, recipient string) (*config.Account, *bounce.Result, error) {
+	src, err := openInput(name)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer src.Close()
+	orig, err := bounce.Parse(src)
+	if err != nil {
+		return nil, nil, err
+	}
+	acc := forced
+	if acc == nil {
+		if acc, err = cfg.Match(orig.Recipients); err != nil {
+			return nil, nil, err
+		}
 	}
 	res, err := bounce.Build(orig, bounce.Options{
 		Domain:    acc.Domain,
@@ -180,27 +278,12 @@ func runBounce(args []string) error {
 		Recipient: recipient,
 	})
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
+	return acc, res, nil
+}
 
-	if out != "" {
-		if err := os.WriteFile(out, res.Message, 0o600); err != nil {
-			return err
-		}
-	}
-	if dryRun || !yes {
-		os.Stdout.Write(res.Message)
-		fmt.Println()
-	}
-	if dryRun {
-		return nil
-	}
-
-	fmt.Fprintf(os.Stderr, "Bounce %s as unknown, sending to %s\n", res.Recipient, res.To)
-	if !yes && !confirm() {
-		return fmt.Errorf("aborted")
-	}
-
+func send(acc *config.Account, res *bounce.Result) error {
 	pw, err := secret.Get(acc.SMTP.Username)
 	if err != nil {
 		return fmt.Errorf("keychain: %w (run `outis init %s`)", err, acc.Domain)
@@ -225,30 +308,114 @@ func runBounce(args []string) error {
 	default:
 		fmt.Fprintf(os.Stderr, "Warning: server only accepted %s as envelope sender, it will appear as Return-Path in the raw headers\n", env)
 	}
-	fmt.Fprintln(os.Stderr, "Sent")
 	return nil
 }
 
-func readSource(fromClip bool, path string) (io.Reader, error) {
-	switch {
-	case fromClip:
+// Special input names for the clipboard and stdin
+const (
+	inputClipboard = "<clipboard>"
+	inputStdin     = "<stdin>"
+)
+
+// collectInputs turns the arguments into a flat list of inputs, expanding
+// directories to their visible regular files.
+func collectInputs(fromClip bool, args []string) ([]string, error) {
+	if fromClip {
+		if len(args) > 0 {
+			return nil, fmt.Errorf("--clipboard cannot be combined with files")
+		}
+		return []string{inputClipboard}, nil
+	}
+	if len(args) == 0 {
+		if term.IsTerminal(int(syscall.Stdin)) {
+			return nil, fmt.Errorf("no input: pass files or a directory, pipe the email, or use --clipboard")
+		}
+		return []string{inputStdin}, nil
+	}
+	var out []string
+	for _, a := range args {
+		if a == "-" {
+			out = append(out, inputStdin)
+			continue
+		}
+		st, err := os.Stat(a)
+		if err != nil {
+			return nil, err
+		}
+		if !st.IsDir() {
+			out = append(out, a)
+			continue
+		}
+		entries, err := os.ReadDir(a)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			if e.Type().IsRegular() && !strings.HasPrefix(e.Name(), ".") {
+				out = append(out, filepath.Join(a, e.Name()))
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no files found")
+	}
+	return out, nil
+}
+
+func openInput(name string) (io.ReadCloser, error) {
+	switch name {
+	case inputClipboard:
 		s, err := clipboard.ReadAll()
 		if err != nil {
 			return nil, fmt.Errorf("clipboard: %w", err)
 		}
-		return strings.NewReader(s), nil
-	case path != "" && path != "-":
-		return os.Open(path)
-	default:
-		if term.IsTerminal(int(syscall.Stdin)) {
-			return nil, fmt.Errorf("no input: pass a file, pipe the email, or use --clipboard")
-		}
-		return os.Stdin, nil
+		return io.NopCloser(strings.NewReader(s)), nil
+	case inputStdin:
+		return io.NopCloser(os.Stdin), nil
 	}
+	return os.Open(name)
+}
+
+// writeOut saves the bounces: to a single file, or into a directory when
+// processing a batch.
+func writeOut(out string, jobs []job, batch bool) error {
+	if !batch {
+		for _, j := range jobs {
+			if j.err == nil {
+				return os.WriteFile(out, j.res.Message, 0o600)
+			}
+		}
+		return nil
+	}
+	if err := os.MkdirAll(out, 0o700); err != nil {
+		return err
+	}
+	for _, j := range jobs {
+		if j.err != nil {
+			continue
+		}
+		base := strings.TrimSuffix(filepath.Base(j.name), filepath.Ext(j.name))
+		if err := os.WriteFile(filepath.Join(out, base+".bounce.eml"), j.res.Message, 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func failures(jobs []job) error {
+	n := 0
+	for _, j := range jobs {
+		if j.err != nil {
+			n++
+		}
+	}
+	if n > 0 {
+		return fmt.Errorf("%d of %d inputs failed", n, len(jobs))
+	}
+	return nil
 }
 
 func confirm() bool {
-	fmt.Fprint(os.Stderr, "Send? [y/N] ")
 	s, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	s = strings.ToLower(strings.TrimSpace(s))
 	return s == "y" || s == "yes"

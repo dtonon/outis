@@ -28,7 +28,18 @@ go build -o outis cmd/outis/main.go
 ./outis -n message.eml        # dry run, print only
 ./outis -y -r me@example.com message.eml
 ./outis -a example.com -c     # force an account instead of matching recipients
+./outis inbox/                # every file in the directory, one confirmation for the batch
+./outis -n -o out/ inbox/     # dry run, write each bounce to out/<name>.bounce.eml
 ```
+
+## Batch mode
+
+Arguments can be files and directories, mixed. A directory expands to its
+visible regular files, any extension, not recursive. Each file is matched to
+an account on its own; files that cannot be parsed or matched are reported
+and skipped while the others proceed, and the exit code is non-zero if any
+failed. With more than one input a summary line per file is shown instead of
+the full preview, followed by a single confirmation.
 
 ## Multiple accounts
 
