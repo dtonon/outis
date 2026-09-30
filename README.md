@@ -30,6 +30,7 @@ go build -o outis cmd/outis/main.go
 ./outis -a example.com -c     # force an account instead of matching recipients
 ./outis inbox/                # every file in the directory, one confirmation for the batch
 ./outis -n -o out/ inbox/     # dry run, write each bounce to out/<name>.bounce.eml
+./outis -d inbox/             # delete each file once its bounce is sent
 ```
 
 ## Batch mode

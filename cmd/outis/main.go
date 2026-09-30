@@ -34,6 +34,7 @@ Flags:
   -n, --dry-run        print the bounce, do not send
   -o, --out PATH       also write the bounce to PATH (a directory when processing several files)
   -y, --yes            send without confirmation
+  -d, --delete         delete each file after its bounce is sent
 `
 
 func main() {
@@ -142,9 +143,11 @@ func runBounce(args []string) error {
 	fs := flag.NewFlagSet("bounce", flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	var (
-		fromClip, dryRun, yes   bool
-		recipient, out, account string
+		fromClip, dryRun, yes, del bool
+		recipient, out, account    string
 	)
+	fs.BoolVar(&del, "d", false, "")
+	fs.BoolVar(&del, "delete", false, "")
 	fs.StringVar(&account, "a", "", "")
 	fs.StringVar(&account, "account", "", "")
 	fs.BoolVar(&fromClip, "c", false, "")
@@ -250,10 +253,18 @@ func runBounce(args []string) error {
 			fmt.Fprintf(os.Stderr, "%-24s failed: %v\n", j.name, j.err)
 			continue
 		}
+		status := "sent"
+		if del && j.name != inputStdin && j.name != inputClipboard {
+			if err := os.Remove(j.name); err != nil {
+				status = "sent, delete failed: " + err.Error()
+			} else {
+				status = "sent, deleted"
+			}
+		}
 		if batch {
-			fmt.Fprintf(os.Stderr, "%-24s sent\n", j.name)
+			fmt.Fprintf(os.Stderr, "%s %s\n", j.name, status)
 		} else {
-			fmt.Fprintln(os.Stderr, "Sent")
+			fmt.Fprintln(os.Stderr, strings.ToUpper(status[:1])+status[1:])
 		}
 	}
 	return failures(jobs)
