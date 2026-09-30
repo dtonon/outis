@@ -29,6 +29,21 @@ dist:
         echo "$out"
     done
 
+# Create the GitHub release for the current version with dist/ attached; `just publish draft` for a draft
+publish MODE="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    v="{{version}}"; tag="v$v"
+    [[ -z "$(git status --porcelain)" ]] || { echo "working tree not clean"; exit 1; }
+    git rev-parse -q --verify "refs/tags/$tag" >/dev/null || { echo "tag $tag not found, run: just release $v"; exit 1; }
+    [[ -n "$(git ls-remote --tags origin "$tag")" ]] || { echo "tag $tag not on origin, run: git push --follow-tags"; exit 1; }
+    ! gh release view "$tag" >/dev/null 2>&1 || { echo "release $tag already exists"; exit 1; }
+    notes="$(sed -n "/^## \[$v\]/,/^## \[/p" CHANGELOG.md | sed '1d;$d')"
+    flags=()
+    [[ "{{MODE}}" == "draft" ]] && flags+=(--draft)
+    just dist
+    gh release create "$tag" dist/* --title "$tag" --notes "$notes" "${flags[@]}"
+
 # Vet and run the tests
 test:
     go vet ./...
