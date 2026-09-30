@@ -38,7 +38,7 @@ publish MODE="":
     git rev-parse -q --verify "refs/tags/$tag" >/dev/null || { echo "tag $tag not found, run: just release $v"; exit 1; }
     [[ -n "$(git ls-remote --tags origin "$tag")" ]] || { echo "tag $tag not on origin, run: git push --follow-tags"; exit 1; }
     ! gh release view "$tag" >/dev/null 2>&1 || { echo "release $tag already exists"; exit 1; }
-    notes="$(sed -n "/^## \[$v\]/,/^## \[/p" CHANGELOG.md | sed '1d;$d')"
+    notes="$(awk -v h="## [$v]" 'index($0,h)==1{f=1;next} /^## \[/{f=0} f' CHANGELOG.md)"
     flags=()
     [[ "{{MODE}}" == "draft" ]] && flags+=(--draft)
     just dist
