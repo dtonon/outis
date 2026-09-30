@@ -19,6 +19,7 @@ import (
 	"github.com/dtonon/outis/internal/config"
 	"github.com/dtonon/outis/internal/secret"
 	"github.com/dtonon/outis/internal/sender"
+	"github.com/dtonon/outis/internal/version"
 )
 
 const usage = `Usage:
@@ -26,6 +27,7 @@ const usage = `Usage:
   outis init [domain]    add or update an account interactively
   outis accounts         list configured accounts
   outis config           print the config file path
+  outis version          print the version
 
 Flags:
   -a, --account DOMAIN report as the account for DOMAIN instead of matching recipients
@@ -44,6 +46,8 @@ func main() {
 		err = runInit(first(os.Args[2:]))
 	case "accounts":
 		err = runAccounts()
+	case "version", "-v", "--version":
+		fmt.Println("outis", version.String())
 	case "config":
 		var p string
 		p, err = config.Path()
