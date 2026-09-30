@@ -16,6 +16,19 @@ build:
 install:
     go install -ldflags "{{ldflags}}" ./cmd/outis
 
+# Cross-compile into dist/ as outis-<version>-<os>-<arch>
+dist:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -rf dist && mkdir dist
+    for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
+        os="${target%/*}"; arch="${target#*/}"
+        out="dist/outis-{{version}}-$os-$arch"
+        [[ "$os" == windows ]] && out="$out.exe"
+        CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w {{ldflags}}" -o "$out" ./cmd/outis
+        echo "$out"
+    done
+
 # Vet and run the tests
 test:
     go vet ./...
