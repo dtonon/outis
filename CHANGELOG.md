@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.1.0] - 2026-09-30
 
+## [0.1.0] - 2026-09-30
+
 ### Added
 
 - Fake "user unknown" bounce built as an RFC 3464 DSN modelled on Postfix
