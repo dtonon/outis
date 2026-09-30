@@ -2,9 +2,11 @@
 
 Outis fights spam generating and sends a fake "user unknown" bounce for an email you received, so the sender believes your address does not exist. This should work well for the recent trend of AI-generated automated emails, where the sender may expect a reply; it helps to clean your email from their list.
 
-The bounce is an RFC 3464 delivery status notification modelled on Postfix: `multipart/report` with a human-readable part, a `message/delivery-status` part with status `5.1.1`, and the original message attached as `message/rfc822`. It is sent to the original `Return-Path` from `MAILER-DAEMON@<your domain>` with a null envelope sender when the SMTP server allows it.
-
 Outis (Οὖτις) is Greek for "nobody". In the Odyssey, Odysseus gives it as his name to the Cyclops Polyphemus, so that when the blinded giant calls for help and shouts that "Nobody" is hurting him, the other Cyclopes leave. The tool does the same for your mailbox: it tells whoever is asking that there is nobody here.
+
+![](assets/banner.jpg)
+
+The bounce is an RFC 3464 delivery status notification modelled on Postfix: `multipart/report` with a human-readable part, a `message/delivery-status` part with status `5.1.1`, and the original message attached as `message/rfc822`. It is sent to the original `Return-Path` from `MAILER-DAEMON@<your domain>` with a null envelope sender when the SMTP server allows it.
 
 ## Known limitations
 
