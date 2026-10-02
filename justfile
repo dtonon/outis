@@ -44,6 +44,12 @@ publish MODE="":
     just dist
     gh release create "$tag" dist/* --title "$tag" --notes "$notes" "${flags[@]}"
 
+# Release, push and publish in one go; `just ship X.Y.Z draft` for a draft release
+ship VERSION MODE="":
+    just release {{VERSION}}
+    git push --follow-tags
+    just publish {{MODE}}
+
 # Vet and run the tests
 test:
     go vet ./...
