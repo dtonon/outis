@@ -303,6 +303,9 @@ func prepare(cfg *config.Config, forced *config.Account, name, recipient string)
 	if err != nil {
 		return nil, nil, err
 	}
+	if cfg.Find(domainOf(res.To)) != nil {
+		return nil, nil, fmt.Errorf("destination %s is at your own domain, sender probably forged, nothing to bounce to", res.To)
+	}
 	return acc, res, nil
 }
 
@@ -442,6 +445,13 @@ func confirm() bool {
 	s, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	s = strings.ToLower(strings.TrimSpace(s))
 	return s == "y" || s == "yes"
+}
+
+func domainOf(addr string) string {
+	if i := strings.LastIndex(addr, "@"); i >= 0 {
+		return addr[i+1:]
+	}
+	return ""
 }
 
 func first(args []string) string {

@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Skip messages whose bounce destination is at one of your own domains, typically a forged sender
+
 ## [0.1.0] - 2026-09-30
 
 ### Added
