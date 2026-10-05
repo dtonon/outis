@@ -492,7 +492,6 @@ func offerBounce(ctx context.Context, cfg *config.Config, forced *config.Account
 		icon,
 		zenity.OKLabel("Send"),
 		zenity.CancelLabel("Skip"),
-		zenity.DefaultCancel(),
 		zenity.Context(ctx))
 	switch {
 	case errors.Is(err, zenity.ErrCanceled):

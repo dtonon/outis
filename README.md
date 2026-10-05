@@ -39,7 +39,7 @@ Arguments can be any mix of files and directories. A directory expands to its vi
 
 ## Monitor mode
 
-`outis monitor` watches the clipboard and, whenever you copy an email that matches one of your accounts, opens a native dialog asking whether to send the bounce. Copy the raw source of the message ("Show original", "View source" or similar in your mail client), check the dialog and press Send. Anything that is not an email is ignored, emails that match no account are reported in the terminal and skipped, and the same clipboard content is never offered twice. The dialog defaults to Skip, so a stray Enter does not send anything. Stop with Ctrl-C.
+`outis monitor` watches the clipboard and, whenever you copy an email that matches one of your accounts, opens a native dialog asking whether to send the bounce. Copy the raw source of the message ("Show original", "View source" or similar in your mail client), check the dialog and press Send. Anything that is not an email is ignored, emails that match no account are reported in the terminal and skipped, and the same clipboard content is never offered twice. Enter sends, Escape skips. Stop with Ctrl-C.
 
 ```
 ./outis monitor               # watch the clipboard, confirm each bounce in a dialog
