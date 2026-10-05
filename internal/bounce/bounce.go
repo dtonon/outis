@@ -37,6 +37,10 @@ type Options struct {
 	Now    time.Time
 }
 
+// SizeLimit mirrors the Postfix bounce_size_limit default: larger originals
+// are returned as headers only.
+const SizeLimit = 50000
+
 // Result is a rendered bounce ready to be sent.
 type Result struct {
 	From string
@@ -189,12 +193,19 @@ func Build(o *Original, opt Options) (*Result, error) {
 	w("")
 
 	w("--%s", boundary)
-	w("Content-Description: Undelivered Message")
-	w("Content-Type: message/rfc822")
+	attached := o.Raw
+	if len(o.Raw) > SizeLimit {
+		w("Content-Description: Undelivered Message Headers")
+		w("Content-Type: text/rfc822-headers")
+		attached = o.headers()
+	} else {
+		w("Content-Description: Undelivered Message")
+		w("Content-Type: message/rfc822")
+	}
 	w("Content-Transfer-Encoding: 8bit")
 	w("")
-	b.Write(o.Raw)
-	if !bytes.HasSuffix(o.Raw, []byte("\r\n")) {
+	b.Write(attached)
+	if !bytes.HasSuffix(attached, []byte("\r\n")) {
 		b.WriteString("\r\n")
 	}
 	w("--%s--", boundary)
@@ -206,6 +217,14 @@ func Build(o *Original, opt Options) (*Result, error) {
 		Recipient:  rcpt,
 		Message:    []byte(b.String()),
 	}, nil
+}
+
+// headers returns the raw header block of the original message.
+func (o *Original) headers() []byte {
+	if i := bytes.Index(o.Raw, []byte("\r\n\r\n")); i >= 0 {
+		return o.Raw[:i+2]
+	}
+	return o.Raw
 }
 
 // queueID mimics a Postfix long queue ID: uppercase hex, digit first.

@@ -6,7 +6,7 @@ Outis (Οὖτις) is Greek for "nobody". In the Odyssey, Odysseus gives it as 
 
 ![](assets/banner.jpg)
 
-The bounce is an RFC 3464 delivery status notification modelled on Postfix: `multipart/report` with a human-readable part, a `message/delivery-status` part with status `5.1.1`, and the original message attached as `message/rfc822`. It is sent to the original `Return-Path` from `MAILER-DAEMON@<your domain>` with a null envelope sender when the SMTP server allows it.
+The bounce is an RFC 3464 delivery status notification modelled on Postfix: `multipart/report` with a human-readable part, a `message/delivery-status` part with status `5.1.1`, and the original message attached as `message/rfc822`, or only its headers as `text/rfc822-headers` when the original exceeds 50 KB, the Postfix `bounce_size_limit` default. It is sent to the original `Return-Path` from `MAILER-DAEMON@<your domain>` with a null envelope sender when the SMTP server allows it.
 
 ## Known limitations
 

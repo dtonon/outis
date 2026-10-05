@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - `monitor` command that watches the clipboard and confirms each bounce through a native dialog
 
+### Changed
+
+- Originals over 50 KB are returned as headers only, like Postfix with its default `bounce_size_limit`
+
 ### Fixed
 
 - Report the address the sender used instead of the mailbox behind an alias, which Delivered-To exposed

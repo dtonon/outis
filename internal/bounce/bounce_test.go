@@ -108,6 +108,36 @@ Body.
 	}
 }
 
+func TestLargeOriginalHeadersOnly(t *testing.T) {
+	big := sample + strings.Repeat("filler line of text\n", SizeLimit/20)
+	o, err := Parse(strings.NewReader(big))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Build(o, Options{Domain: "example.com", MTAHost: "mail.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := string(res.Message)
+	for _, want := range []string{
+		"Content-Description: Undelivered Message Headers",
+		"Content-Type: text/rfc822-headers",
+		"Subject: Hello\r\n",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"message/rfc822", "Body here.", "filler line"} {
+		if strings.Contains(msg, unwanted) {
+			t.Errorf("unexpected %q", unwanted)
+		}
+	}
+	if len(res.Message) > SizeLimit/2 {
+		t.Errorf("bounce is %d bytes, body was not dropped", len(res.Message))
+	}
+}
+
 func TestNoRecipientAtDomain(t *testing.T) {
 	o, _ := Parse(strings.NewReader(sample))
 	_, err := Build(o, Options{Domain: "nope.com", MTAHost: "mail.nope.com"})
