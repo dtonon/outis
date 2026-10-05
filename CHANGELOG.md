@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-05
+
 ### Changed
 
 - Originals over 50 KB are returned as headers only, like Postfix with its default `bounce_size_limit`
