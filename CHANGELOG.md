@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-05
+
 ### Added
 
 - `monitor` command that watches the clipboard and confirms each bounce through a native dialog
