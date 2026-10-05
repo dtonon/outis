@@ -69,6 +69,7 @@ release VERSION:
     [[ -z "$(git status --porcelain)" ]] || { echo "working tree not clean"; exit 1; }
     ! git rev-parse -q --verify "refs/tags/v$v" >/dev/null || { echo "tag v$v exists"; exit 1; }
     grep -q '^## \[Unreleased\]' CHANGELOG.md || { echo "no Unreleased section in CHANGELOG.md"; exit 1; }
+    [[ -n "$(awk '/^## \[Unreleased\]/{f=1;next} /^## \[/{f=0} f && /^- /' CHANGELOG.md)" ]] || { echo "no entries under Unreleased in CHANGELOG.md"; exit 1; }
     sed -i '' "s/^const Number = \".*\"/const Number = \"$v\"/" internal/version/version.go
     sed -i '' "s/^## \[Unreleased\]/## [Unreleased]\n\n## [$v] - $(date +%Y-%m-%d)/" CHANGELOG.md
     just test
