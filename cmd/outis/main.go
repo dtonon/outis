@@ -42,6 +42,7 @@ Flags:
   -a, --account DOMAIN report as the account for DOMAIN instead of matching recipients
   -c, --clipboard      read the email from the clipboard
   -r, --recipient      address to report as unknown (default: first at your domain)
+  -t, --to ADDRESS     send the bounce to ADDRESS instead of the envelope sender
   -n, --dry-run        print the bounce, do not send
   -o, --out PATH       also write the bounce to PATH (a directory when processing several files)
   -y, --yes            send without confirmation
@@ -160,8 +161,8 @@ func runBounce(args []string) error {
 	fs := flag.NewFlagSet("bounce", flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	var (
-		fromClip, dryRun, yes, del bool
-		recipient, out, account    string
+		fromClip, dryRun, yes, del  bool
+		recipient, to, out, account string
 	)
 	fs.BoolVar(&del, "d", false, "")
 	fs.BoolVar(&del, "delete", false, "")
@@ -175,6 +176,8 @@ func runBounce(args []string) error {
 	fs.BoolVar(&yes, "yes", false, "")
 	fs.StringVar(&recipient, "r", "", "")
 	fs.StringVar(&recipient, "recipient", "", "")
+	fs.StringVar(&to, "t", "", "")
+	fs.StringVar(&to, "to", "", "")
 	fs.StringVar(&out, "o", "", "")
 	fs.StringVar(&out, "out", "", "")
 	if err := fs.Parse(args); err != nil {
@@ -201,7 +204,7 @@ func runBounce(args []string) error {
 	var jobs []job
 	for _, in := range inputs {
 		j := job{name: in}
-		j.acc, j.res, j.err = prepare(cfg, forced, in, recipient)
+		j.acc, j.res, j.err = prepare(cfg, forced, in, recipient, to)
 		if j.err != nil && !batch {
 			return j.err
 		}
@@ -237,9 +240,9 @@ func runBounce(args []string) error {
 			continue
 		}
 		pending++
-		note := ""
-		if j.res.Redirected {
-			note = " (From header, Return-Path is in reply_to_from_domains)"
+		note := describe(j.res, to != "")
+		if note != "" {
+			note = " (" + note + ")"
 		}
 		if batch {
 			fmt.Fprintf(os.Stderr, "%s %s\n-> %s %s%s\n\n", j.name, j.res.Recipient, j.res.To, j.acc.Domain, note)
@@ -287,8 +290,21 @@ func runBounce(args []string) error {
 	return failures(jobs)
 }
 
+// describe explains why the bounce goes where it goes, empty in the plain case.
+func describe(res *bounce.Result, forcedTo bool) string {
+	switch {
+	case forcedTo:
+		return "--to"
+	case res.Redirected:
+		return "From header, the sender's domain is in reply_to_from_domains"
+	case res.Forward != nil:
+		return fmt.Sprintf("forwarded by %s, sent to the original sender", res.Forward.By)
+	}
+	return ""
+}
+
 // prepare parses one input and builds its bounce with the matching account.
-func prepare(cfg *config.Config, forced *config.Account, name, recipient string) (*config.Account, *bounce.Result, error) {
+func prepare(cfg *config.Config, forced *config.Account, name, recipient, to string) (*config.Account, *bounce.Result, error) {
 	src, err := openInput(name)
 	if err != nil {
 		return nil, nil, err
@@ -298,11 +314,11 @@ func prepare(cfg *config.Config, forced *config.Account, name, recipient string)
 	if err != nil {
 		return nil, nil, err
 	}
-	return build(cfg, forced, orig, recipient)
+	return build(cfg, forced, orig, recipient, to)
 }
 
 // build picks the account for a parsed message and renders its bounce.
-func build(cfg *config.Config, forced *config.Account, orig *bounce.Original, recipient string) (*config.Account, *bounce.Result, error) {
+func build(cfg *config.Config, forced *config.Account, orig *bounce.Original, recipient, to string) (*config.Account, *bounce.Result, error) {
 	var err error
 	acc := forced
 	if acc == nil {
@@ -314,8 +330,9 @@ func build(cfg *config.Config, forced *config.Account, orig *bounce.Original, re
 		Domain:    acc.Domain,
 		MTAHost:   acc.MTAHost,
 		Recipient: recipient,
+		SendTo:    to,
 	}
-	if cfg.ReplyToFrom(orig.ReturnPath) && orig.From != "" {
+	if to == "" && cfg.ReplyToFrom(orig.EnvelopeSender()) && orig.From != "" {
 		opt.SendTo = orig.From
 	}
 	res, err := bounce.Build(orig, opt)
@@ -449,7 +466,7 @@ func offerBounce(ctx context.Context, cfg *config.Config, forced *config.Account
 	log := func(format string, a ...any) {
 		fmt.Fprintf(os.Stderr, time.Now().Format("15:04:05 ")+format+"\n", a...)
 	}
-	acc, res, err := build(cfg, forced, orig, "")
+	acc, res, err := build(cfg, forced, orig, "", "")
 	if err != nil {
 		log("Skipped: %v", err)
 		return
@@ -464,8 +481,8 @@ func offerBounce(ctx context.Context, cfg *config.Config, forced *config.Account
 	}
 	text := fmt.Sprintf("Bounce %s as unknown?\n\nFrom: %s\nSubject: %s\n\nThe bounce goes to %s from %s.",
 		res.Recipient, decode("From"), decode("Subject"), res.To, res.From)
-	if res.Redirected {
-		text += "\nSent to the From header, the Return-Path is in reply_to_from_domains."
+	if note := describe(res, false); note != "" {
+		text += "\n" + strings.ToUpper(note[:1]) + note[1:] + "."
 	}
 	if dryRun {
 		text += "\n\nDry run, the bounce is only printed."

@@ -22,6 +22,8 @@ type Original struct {
 	From       string
 	MessageID  string
 	Recipients []string
+	// Forward is set when the message came through a forwarder.
+	Forward *Forward
 }
 
 // Options control how the DSN is rendered.
@@ -32,7 +34,7 @@ type Options struct {
 	MTAHost string
 	// Recipient overrides the automatically picked failed address.
 	Recipient string
-	// SendTo overrides the Return-Path as destination of the bounce.
+	// SendTo overrides the envelope sender as destination of the bounce.
 	SendTo string
 	Now    time.Time
 }
@@ -45,10 +47,12 @@ const SizeLimit = 50000
 type Result struct {
 	From string
 	To   string
-	// Redirected is true when To is not the original Return-Path.
+	// Redirected is true when To is not the envelope sender.
 	Redirected bool
 	Recipient  string
 	Message    []byte
+	// Forward is set when the original came through a forwarder.
+	Forward *Forward
 }
 
 // Parse reads a raw RFC 5322 message and extracts what the DSN needs.
@@ -84,7 +88,17 @@ func Parse(r io.Reader) (*Original, error) {
 			o.Recipients = append(o.Recipients, allAddresses(v)...)
 		}
 	}
+	o.Forward = detectForward(msg.Header, o.ReturnPath)
 	return o, nil
+}
+
+// EnvelopeSender is the address the bounce goes to by default: the sender
+// before any forwarder rewrote the Return-Path.
+func (o *Original) EnvelopeSender() string {
+	if o.Forward != nil {
+		return o.Forward.Sender
+	}
+	return o.ReturnPath
 }
 
 // PickRecipient returns the first recipient at domain, else the first one seen.
@@ -111,6 +125,9 @@ func Build(o *Original, opt Options) (*Result, error) {
 	}
 
 	rcpt := opt.Recipient
+	if rcpt == "" && o.Forward != nil {
+		rcpt = o.Forward.Recipient
+	}
 	if rcpt == "" {
 		var ok bool
 		rcpt, ok = o.PickRecipient(opt.Domain)
@@ -127,7 +144,7 @@ func Build(o *Original, opt Options) (*Result, error) {
 	qid := queueID()
 	date := now.Format("Mon, 2 Jan 2006 15:04:05 -0700 (MST)")
 	from := "MAILER-DAEMON@" + opt.Domain
-	to := o.ReturnPath
+	to := o.EnvelopeSender()
 	if opt.SendTo != "" {
 		to = opt.SendTo
 	}
@@ -182,7 +199,7 @@ func Build(o *Original, opt Options) (*Result, error) {
 	w("")
 	w("Reporting-MTA: dns; %s", opt.MTAHost)
 	w("X-Postfix-Queue-ID: %s", qid)
-	w("X-Postfix-Sender: rfc822; %s", o.ReturnPath)
+	w("X-Postfix-Sender: rfc822; %s", o.EnvelopeSender())
 	w("Arrival-Date: %s", date)
 	w("")
 	w("Final-Recipient: rfc822; %s", rcpt)
@@ -213,9 +230,10 @@ func Build(o *Original, opt Options) (*Result, error) {
 	return &Result{
 		From:       from,
 		To:         to,
-		Redirected: to != o.ReturnPath,
+		Redirected: to != o.EnvelopeSender(),
 		Recipient:  rcpt,
 		Message:    []byte(b.String()),
+		Forward:    o.Forward,
 	}, nil
 }
 

@@ -26,6 +26,7 @@ go build -o outis cmd/outis/main.go
 ./outis -c                    # read the email from the clipboard
 ./outis -n message.eml        # dry run, print only
 ./outis -y -r me@example.com message.eml
+./outis -t sender@example.org message.eml   # send the bounce to this address
 ./outis -a example.com -c     # force an account instead of matching recipients
 ./outis inbox/                # every file in the directory, one confirmation for the batch
 ./outis -n -o out/ inbox/     # dry run, write each bounce to out/<name>.bounce.eml
@@ -69,6 +70,12 @@ host = "smtp.other.org"
 port = 465
 username = "mailer-daemon@other.org"
 ```
+
+## Forwarded emails
+
+When an email reached you through a forwarder, for example a Gmail account that forwards to your domain, the forwarder rewrote the envelope: the `Return-Path` points at the forwarder, so a bounce sent there would never reach the sender and could make the forwarder pause the rule. Outis recognises these messages from the rewritten `Return-Path` (SRS and Gmail's `+caf_=` scheme) or from an earlier hop recording a different envelope sender in `ARC-Authentication-Results`, `Received-SPF` or `Authentication-Results`. The bounce is then sent to that original sender and reports the address the sender used, the earliest `Delivered-To`, since that is the one on their list. The preview says `forwarded by <domain>` when this applies. Mailing lists are not forwarders: a message carrying `List-Id` or similar headers still bounces to its `Return-Path`.
+
+The bounce comes from your domain even though it reports an address elsewhere, like a relay reporting a downstream failure. Use `--recipient` when the original address was not recorded, and `--to` to send the bounce to any other address. A destination at one of your own domains is refused in every case.
 
 ## Providers with shared suppression lists
 
