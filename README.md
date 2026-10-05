@@ -36,6 +36,18 @@ go build -o outis cmd/outis/main.go
 
 Arguments can be any mix of files and directories. A directory expands to its visible regular files, any extension, not recursive. Each file is matched to an account on its own; files that cannot be parsed or matched are reported and skipped while the others proceed, and the exit code is non-zero if any failed. With more than one input a summary line per file is shown instead of the full preview, followed by a single confirmation.
 
+## Monitor mode
+
+`outis monitor` watches the clipboard and, whenever you copy an email that matches one of your accounts, opens a native dialog asking whether to send the bounce. Copy the raw source of the message ("Show original", "View source" or similar in your mail client), check the dialog and press Send. Anything that is not an email is ignored, emails that match no account are reported in the terminal and skipped, and the same clipboard content is never offered twice. The dialog defaults to Skip, so a stray Enter does not send anything. Stop with Ctrl-C.
+
+```
+./outis monitor               # watch the clipboard, confirm each bounce in a dialog
+./outis monitor -n            # dry run, print the bounce instead of sending it
+./outis monitor -a example.com
+```
+
+On macOS and Windows the dialog is built in; on Linux the `zenity` program must be installed.
+
 ## Multiple accounts
 
 Each account covers one domain. The bounce is built with the account whose domain matches a recipient (Delivered-To, To or Cc) of the original email, so the sender, mail host and SMTP server all belong to that domain. If no account matches, or more than one does, use `--account`.

@@ -3,16 +3,22 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"mime"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/atotto/clipboard"
+	"github.com/ncruces/zenity"
 	"golang.org/x/term"
 
 	"github.com/dtonon/outis/internal/bounce"
@@ -24,6 +30,7 @@ import (
 
 const usage = `Usage:
   outis [flags] [file|dir ...]   build bounces for emails (files, directories, stdin or clipboard)
+  outis monitor [flags]  watch the clipboard and ask in a dialog before bouncing a copied email
   outis init [domain]    add or update an account interactively
   outis accounts         list configured accounts
   outis config           print the config file path
@@ -37,6 +44,8 @@ Flags:
   -o, --out PATH       also write the bounce to PATH (a directory when processing several files)
   -y, --yes            send without confirmation
   -d, --delete         delete each file after its bounce is sent
+
+Monitor flags: --account, --dry-run
 `
 
 func main() {
@@ -56,6 +65,8 @@ func main() {
 		fmt.Print(usage)
 	case "bounce":
 		err = runBounce(os.Args[2:])
+	case "monitor":
+		err = runMonitor(os.Args[2:])
 	default:
 		err = runBounce(os.Args[1:])
 	}
@@ -285,6 +296,12 @@ func prepare(cfg *config.Config, forced *config.Account, name, recipient string)
 	if err != nil {
 		return nil, nil, err
 	}
+	return build(cfg, forced, orig, recipient)
+}
+
+// build picks the account for a parsed message and renders its bounce.
+func build(cfg *config.Config, forced *config.Account, orig *bounce.Original, recipient string) (*config.Account, *bounce.Result, error) {
+	var err error
 	acc := forced
 	if acc == nil {
 		if acc, err = cfg.Match(orig.Recipients); err != nil {
@@ -335,6 +352,126 @@ func send(acc *config.Account, res *bounce.Result) error {
 		fmt.Fprintf(os.Stderr, "Warning: server only accepted %s as envelope sender, it will appear as Return-Path in the raw headers\n", env)
 	}
 	return nil
+}
+
+const monitorInterval = time.Second
+
+// runMonitor polls the clipboard and offers to bounce every email copied
+// into it, confirming through a native dialog.
+func runMonitor(args []string) error {
+	fs := flag.NewFlagSet("monitor", flag.ContinueOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
+	var (
+		dryRun  bool
+		account string
+	)
+	fs.StringVar(&account, "a", "", "")
+	fs.StringVar(&account, "account", "", "")
+	fs.BoolVar(&dryRun, "n", false, "")
+	fs.BoolVar(&dryRun, "dry-run", false, "")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("monitor reads the clipboard only, it takes no files")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	var forced *config.Account
+	if account != "" {
+		if forced = cfg.Find(account); forced == nil {
+			return fmt.Errorf("no account for %s, configured: %s", account, strings.Join(cfg.Domains(), ", "))
+		}
+	}
+	if !zenity.IsAvailable() {
+		return fmt.Errorf("no dialog program found, install zenity")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	fmt.Fprintln(os.Stderr, "Watching the clipboard, press Ctrl-C to stop")
+
+	tick := time.NewTicker(monitorInterval)
+	defer tick.Stop()
+	var last string
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Fprintln(os.Stderr)
+			return nil
+		case <-tick.C:
+		}
+		if s, err := clipboard.ReadAll(); err == nil && s != last {
+			last = s
+			offerBounce(ctx, cfg, forced, s, dryRun)
+		}
+	}
+}
+
+// offerBounce asks through a dialog whether to bounce the clipboard content,
+// silently ignoring anything that is not an email.
+func offerBounce(ctx context.Context, cfg *config.Config, forced *config.Account, clip string, dryRun bool) {
+	orig, err := bounce.Parse(strings.NewReader(clip))
+	if err != nil {
+		return
+	}
+	log := func(format string, a ...any) {
+		fmt.Fprintf(os.Stderr, time.Now().Format("15:04:05 ")+format+"\n", a...)
+	}
+	acc, res, err := build(cfg, forced, orig, "")
+	if err != nil {
+		log("Skipped: %v", err)
+		return
+	}
+
+	dec := new(mime.WordDecoder)
+	decode := func(h string) string {
+		if d, err := dec.DecodeHeader(orig.Header.Get(h)); err == nil {
+			return d
+		}
+		return orig.Header.Get(h)
+	}
+	text := fmt.Sprintf("Bounce %s as unknown?\n\nFrom: %s\nSubject: %s\n\nThe bounce goes to %s from %s.",
+		res.Recipient, decode("From"), decode("Subject"), res.To, res.From)
+	if res.Redirected {
+		text += "\nSent to the From header, the Return-Path is in reply_to_from_domains."
+	}
+	if dryRun {
+		text += "\n\nDry run, the bounce is only printed."
+	}
+	err = zenity.Question(text,
+		zenity.Title("Outis"),
+		zenity.OKLabel("Send"),
+		zenity.CancelLabel("Skip"),
+		zenity.DefaultCancel(),
+		zenity.Context(ctx))
+	switch {
+	case errors.Is(err, zenity.ErrCanceled):
+		log("Skipped %s, bounce to %s", res.Recipient, res.To)
+		return
+	case ctx.Err() != nil:
+		return
+	case err != nil:
+		log("Dialog failed: %v", err)
+		return
+	}
+
+	if dryRun {
+		os.Stdout.Write(res.Message)
+		fmt.Println()
+		log("Dry run, bounce for %s printed", res.Recipient)
+		return
+	}
+	if err := send(acc, res); err != nil {
+		log("Failed: %v", err)
+		zenity.Error(fmt.Sprintf("Bounce to %s failed:\n%v", res.To, err), zenity.Title("Outis"))
+		return
+	}
+	log("Sent bounce for %s to %s", res.Recipient, res.To)
+	zenity.Notify("Bounce for "+res.Recipient+" sent to "+res.To, zenity.Title("Outis"))
 }
 
 // Special input names for the clipboard and stdin
