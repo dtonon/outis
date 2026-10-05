@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - `monitor` command that watches the clipboard and confirms each bounce through a native dialog
 
+### Fixed
+
+- Report the address the sender used instead of the mailbox behind an alias, which Delivered-To exposed
+
 ## [0.1.1] - 2026-10-02
 
 ### Added

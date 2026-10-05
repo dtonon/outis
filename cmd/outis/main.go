@@ -444,6 +444,7 @@ func offerBounce(ctx context.Context, cfg *config.Config, forced *config.Account
 	}
 	err = zenity.Question(text,
 		zenity.Title("Outis"),
+		zenity.Icon(zenity.QuestionIcon),
 		zenity.OKLabel("Send"),
 		zenity.CancelLabel("Skip"),
 		zenity.DefaultCancel(),

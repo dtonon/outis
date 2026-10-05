@@ -79,6 +79,35 @@ func TestSendTo(t *testing.T) {
 	}
 }
 
+func TestAliasRecipient(t *testing.T) {
+	src := `Return-Path: <news@example.org>
+Delivered-To: real@example.com
+X-Envelope-To: alias@example.com
+From: news@example.org
+To: alias@example.com
+Subject: Hello
+
+Body.
+`
+	o, err := Parse(strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Build(o, Options{Domain: "example.com", MTAHost: "mail.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Recipient != "alias@example.com" {
+		t.Fatalf("recipient: %q, the mailbox behind the alias must not leak", res.Recipient)
+	}
+	bcc := strings.Replace(src, "To: alias@example.com", "To: list@example.org", 1)
+	o, _ = Parse(strings.NewReader(bcc))
+	res, _ = Build(o, Options{Domain: "example.com", MTAHost: "mail.example.com"})
+	if res.Recipient != "alias@example.com" {
+		t.Fatalf("bcc recipient: %q", res.Recipient)
+	}
+}
+
 func TestNoRecipientAtDomain(t *testing.T) {
 	o, _ := Parse(strings.NewReader(sample))
 	_, err := Build(o, Options{Domain: "nope.com", MTAHost: "mail.nope.com"})

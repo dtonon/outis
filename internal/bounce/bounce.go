@@ -73,7 +73,9 @@ func Parse(r io.Reader) (*Original, error) {
 	o.From = firstAddress(msg.Header.Get("From"))
 	o.MessageID = strings.TrimSpace(msg.Header.Get("Message-ID"))
 
-	for _, h := range []string{"Delivered-To", "X-Original-To", "To", "Cc"} {
+	// Headers the sender wrote come first, then the envelope recipient before
+	// alias expansion, so an alias is reported rather than the mailbox behind it
+	for _, h := range []string{"To", "Cc", "X-Original-To", "X-Envelope-To", "Delivered-To"} {
 		for _, v := range msg.Header[h] {
 			o.Recipients = append(o.Recipients, allAddresses(v)...)
 		}
