@@ -4,6 +4,7 @@ package main
 import (
 	"bufio"
 	"context"
+	_ "embed"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -356,6 +358,30 @@ func send(acc *config.Account, res *bounce.Result) error {
 
 const monitorInterval = time.Second
 
+//go:embed icon.png
+var iconPNG []byte
+
+// dialogIcon returns the icon option for the dialogs and a cleanup. The
+// embedded image goes through a temp file; on Linux only GTK icon names are
+// accepted, so the stock one is used.
+func dialogIcon() (zenity.Option, func()) {
+	stock := zenity.Icon(zenity.QuestionIcon)
+	if runtime.GOOS == "linux" {
+		return stock, func() {}
+	}
+	f, err := os.CreateTemp("", "outis-*.png")
+	if err != nil {
+		return stock, func() {}
+	}
+	_, err = f.Write(iconPNG)
+	f.Close()
+	if err != nil {
+		os.Remove(f.Name())
+		return stock, func() {}
+	}
+	return zenity.Icon(f.Name()), func() { os.Remove(f.Name()) }
+}
+
 // runMonitor polls the clipboard and offers to bounce every email copied
 // into it, confirming through a native dialog.
 func runMonitor(args []string) error {
@@ -392,6 +418,8 @@ func runMonitor(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	icon, cleanup := dialogIcon()
+	defer cleanup()
 	fmt.Fprintln(os.Stderr, "Watching the clipboard, press Ctrl-C to stop")
 
 	tick := time.NewTicker(monitorInterval)
@@ -406,14 +434,14 @@ func runMonitor(args []string) error {
 		}
 		if s, err := clipboard.ReadAll(); err == nil && s != last {
 			last = s
-			offerBounce(ctx, cfg, forced, s, dryRun)
+			offerBounce(ctx, cfg, forced, s, dryRun, icon)
 		}
 	}
 }
 
 // offerBounce asks through a dialog whether to bounce the clipboard content,
 // silently ignoring anything that is not an email.
-func offerBounce(ctx context.Context, cfg *config.Config, forced *config.Account, clip string, dryRun bool) {
+func offerBounce(ctx context.Context, cfg *config.Config, forced *config.Account, clip string, dryRun bool, icon zenity.Option) {
 	orig, err := bounce.Parse(strings.NewReader(clip))
 	if err != nil {
 		return
@@ -444,7 +472,7 @@ func offerBounce(ctx context.Context, cfg *config.Config, forced *config.Account
 	}
 	err = zenity.Question(text,
 		zenity.Title("Outis"),
-		zenity.Icon(zenity.QuestionIcon),
+		icon,
 		zenity.OKLabel("Send"),
 		zenity.CancelLabel("Skip"),
 		zenity.DefaultCancel(),
@@ -468,7 +496,7 @@ func offerBounce(ctx context.Context, cfg *config.Config, forced *config.Account
 	}
 	if err := send(acc, res); err != nil {
 		log("Failed: %v", err)
-		zenity.Error(fmt.Sprintf("Bounce to %s failed:\n%v", res.To, err), zenity.Title("Outis"))
+		zenity.Error(fmt.Sprintf("Bounce to %s failed:\n%v", res.To, err), zenity.Title("Outis"), icon)
 		return
 	}
 	log("Sent bounce for %s to %s", res.Recipient, res.To)
