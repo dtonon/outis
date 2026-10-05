@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-05
+
 ### Added
 
 - Forwarded emails (SRS, Gmail `+caf_=`, or an earlier hop recording a different envelope sender) are bounced to the original sender, reporting the address they used instead of the forward target
