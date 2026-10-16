@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-16
+
 ### Changed
 
 - In monitor mode a skipped email (no matching account, forged sender) is reported in a dialog instead of only in the terminal
