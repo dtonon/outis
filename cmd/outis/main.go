@@ -469,6 +469,12 @@ func offerBounce(ctx context.Context, cfg *config.Config, forced *config.Account
 	acc, res, err := build(cfg, forced, orig, "", "")
 	if err != nil {
 		log("Skipped: %v", err)
+		msg := err.Error()
+		zenity.Warning("Skipped: "+strings.ToUpper(msg[:1])+msg[1:],
+			zenity.Title("Outis"),
+			icon,
+			zenity.OKLabel("Dismiss"),
+			zenity.Context(ctx))
 		return
 	}
 
